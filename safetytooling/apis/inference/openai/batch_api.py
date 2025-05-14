@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import math
 import time
 from pathlib import Path
 
@@ -115,15 +116,36 @@ class OpenAIModelBatch:
                 body = result["response"]["body"]
                 choice = body["choices"][0]
                 assert result["custom_id"] in set_custom_ids
-                responses_dict[result["custom_id"]] = LLMResponse(
-                    model_id=model_id,
-                    completion=choice["message"]["content"],
-                    stop_reason=choice["finish_reason"],
-                    duration=None,  # Batch does not track individual durations
-                    api_duration=None,
-                    cost=0,
-                    batch_custom_id=result["custom_id"],
-                )
+                if "logprobs" in choice:
+                    try:
+                        logprobs = choice["logprobs"]["content"][0]["top_logprobs"]
+                        normalized_logprobs = {}
+                        for el in logprobs:
+                            normalized_logprobs[el["token"]] = float(math.exp(el["logprob"]))
+                    except IndexError:
+                        # This should not happen according to the API docs. But it sometimes does.
+                        normalized_logprobs = None
+
+                    responses_dict[result["custom_id"]] = LLMResponse(
+                        model_id=model_id,
+                        completion=choice["message"]["content"],
+                        stop_reason=choice["finish_reason"],
+                        duration=None,  # Batch does not track individual durations
+                        api_duration=None,
+                        cost=0,
+                        batch_custom_id=result["custom_id"],
+                        logprobs=[normalized_logprobs],
+                    )
+                else:
+                    responses_dict[result["custom_id"]] = LLMResponse(
+                        model_id=model_id,
+                        completion=choice["message"]["content"],
+                        stop_reason=choice["finish_reason"],
+                        duration=None,  # Batch does not track individual durations
+                        api_duration=None,
+                        cost=0,
+                        batch_custom_id=result["custom_id"],
+                    )
 
         responses = []
         for custom_id in custom_ids:
